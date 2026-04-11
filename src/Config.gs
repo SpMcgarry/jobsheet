@@ -2,7 +2,7 @@
  * Regional Career Command Center Configuration
  */
 
-const CONFIG = {
+var CONFIG = {
   TOWNS: ["Westford", "Chelmsford", "Groton", "Acton", "Littleton"],
   SHEET_NAME: "Job Listings",
   HEADERS: [
@@ -22,7 +22,7 @@ const CONFIG = {
   }
 };
 
-const SEED_DATA = [
+var SEED_DATA = [
   // Westford
   { name: "Juniper Networks", town: "Westford", industry: "Technology" },
   { name: "Bridges by Epoch at Westford", town: "Westford", industry: "Healthcare" },

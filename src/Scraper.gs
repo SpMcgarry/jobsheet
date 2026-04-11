@@ -3,7 +3,7 @@
  * Responsible for fetching and parsing career pages
  */
 
-const Scraper = {
+var Scraper = {
   
   /**
    * Scrapes a career page and uses AI to extract the latest job

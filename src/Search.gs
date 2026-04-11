@@ -3,7 +3,7 @@
  * Responsible for finding career pages and fallback job searching
  */
 
-const Search = {
+var Search = {
   
   /**
    * Fallback using Google Search API to find job snippets
