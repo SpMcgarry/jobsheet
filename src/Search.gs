@@ -62,44 +62,57 @@ var Search = {
   },
 
   /**
-   * Discovery function to find new companies in target towns
+   * Deep Discovery function to find a comprehensive list of companies
    */
   discoverNewBusinesses: function() {
     const towns = CONFIG.TOWNS;
     const sheet = getOrCreateSheet();
     const existingNames = sheet.getDataRange().getValues().map(row => row[0].toString().toLowerCase());
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
+    const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
+    
+    if (!apiKey || !cx) return;
+
+    const queryTemplates = [
+      "Major employers in [TOWN] MA",
+      "List of companies in [TOWN] MA",
+      "Industrial parks and businesses in [TOWN] MA",
+      "Chamber of commerce members in [TOWN] MA"
+    ];
     
     towns.forEach(town => {
-      const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
-      const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
-      if (!apiKey || !cx) return;
-
-      const query = `List of major employers and companies in ${town} MA`;
-      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}`;
-      
-      try {
-        const response = UrlFetchApp.fetch(url);
-        const data = JSON.parse(response.getContentText());
-        
-        if (data.items) {
-          const combinedSnippets = data.items.map(item => item.snippet).join("\n");
-          const discovered = this.extractCompaniesWithAI(combinedSnippets, town);
+      queryTemplates.forEach(template => {
+        const query = template.replace("[TOWN]", town);
+        // Scan first 2 pages of Google (20 results)
+        [1, 11].forEach(start => {
+          const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&start=${start}`;
           
-          discovered.forEach(company => {
-            if (company.name && !existingNames.includes(company.name.toLowerCase())) {
-              sheet.appendRow([company.name, town, company.industry || "Discovered", company.career_link || "", "", "", ""]);
-              existingNames.push(company.name.toLowerCase());
+          try {
+            const response = UrlFetchApp.fetch(url);
+            const data = JSON.parse(response.getContentText());
+            
+            if (data.items) {
+              const combinedSnippets = data.items.map(item => item.snippet).join("\n");
+              const discovered = this.extractCompaniesWithAI(combinedSnippets, town);
+              
+              discovered.forEach(company => {
+                const name = company.name ? company.name.toString().trim() : "";
+                if (name && !existingNames.includes(name.toLowerCase())) {
+                  sheet.appendRow([name, town, company.industry || "Discovered", company.career_link || "", "", "", ""]);
+                  existingNames.push(name.toLowerCase());
+                }
+              });
             }
-          });
-        }
-      } catch (e) {
-        console.error(`Discovery failed for ${town}: ${e.message}`);
-      }
+          } catch (e) {
+            console.error(`Deep Discovery failed for ${query}: ${e.message}`);
+          }
+        });
+      });
     });
   },
 
   /**
-   * Uses Gemini to parse search snippets into a list of companies
+   * Exhaustive Gemini Extraction
    */
   extractCompaniesWithAI: function(text, town) {
     const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
@@ -107,9 +120,9 @@ var Search = {
     
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const prompt = `
-      Extract a list of distinct companies/employers located in ${town}, MA from the following search snippets.
-      Return ONLY a JSON array of objects:
-      [{"name": "Company Name", "industry": "Industry Type", "career_link": "URL to career page if mentioned"}]
+      EXTRACT EVERY COMPANY: Scan the following search snippets for ANY business or employer located in ${town}, MA.
+      Be exhaustive. Include small businesses, tech firms, manufacturing, and municipal entities.
+      Return ONLY a JSON array: [{"name": "Exact Company Name", "industry": "Industry Type", "career_link": "URL if findable"}]
       
       TEXT:
       ${text}
@@ -128,7 +141,6 @@ var Search = {
       const jsonStr = result.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
       return JSON.parse(jsonStr);
     } catch (e) {
-      console.error("AI Discovery extraction failed", e);
       return [];
     }
   }
