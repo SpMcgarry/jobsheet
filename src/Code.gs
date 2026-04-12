@@ -5,9 +5,11 @@
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🚀 Career Command')
-    .addItem('Daily Refresh', 'manualRefresh')
+    .addItem('1. Initial Setup (Seed Businesses)', 'setupSheet')
     .addSeparator()
-    .addItem('Setup / Update API Keys', 'showSettingsDialog')
+    .addItem('2. Daily Refresh (Scrape Jobs)', 'manualRefresh')
+    .addSeparator()
+    .addItem('⚙️ Setup / Update API Keys', 'showSettingsDialog')
     .addToUi();
 }
 
