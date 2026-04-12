@@ -48,6 +48,19 @@ var Search = {
     const query = `${businessName} ${town} career page`;
     const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}`;
     
+    try {
+      const response = UrlFetchApp.fetch(url);
+      const data = JSON.parse(response.getContentText());
+      
+      if (data.items && data.items.length > 0) {
+        return data.items[0].link;
+      }
+    } catch (e) {
+      console.error(`Discovery failed for ${query}: ${e.message}`);
+    }
+    return null;
+  },
+
   /**
    * Discovery function to find new companies in target towns
    */
