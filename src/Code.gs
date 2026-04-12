@@ -8,9 +8,24 @@ function onOpen() {
     .addItem('1. Initial Setup (Seed Businesses)', 'setupSheet')
     .addSeparator()
     .addItem('2. Daily Refresh (Scrape Jobs)', 'manualRefresh')
+    .addItem('3. Scout New Companies (Discovery)', 'runDiscovery')
     .addSeparator()
     .addItem('⚙️ Setup / Update API Keys', 'showSettingsDialog')
     .addToUi();
+}
+
+/**
+ * Trigger business discovery
+ */
+function runDiscovery() {
+  const ui = SpreadsheetApp.getUi();
+  ui.alert('Scouting for new businesses in ' + CONFIG.TOWNS.join(', ') + '. This uses your Search API.');
+  try {
+    Search.discoverNewBusinesses();
+    ui.alert('Discovery Complete! Check the bottom of your sheet for new entries.');
+  } catch (e) {
+    ui.alert('Error during discovery: ' + e.message);
+  }
 }
 
 /**
