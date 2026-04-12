@@ -49,29 +49,38 @@ function manualRefresh() {
 function refreshJobs() {
   const sheet = getOrCreateSheet();
   const data = sheet.getDataRange().getValues();
-  const headers = data.shift(); // Remove headers
+  data.shift(); // Remove headers
   
   data.forEach((row, index) => {
     const businessName = row[0];
     const town = row[1];
-    const careerUrl = row[3];
+    let careerUrl = row[3];
+    const rowNum = index + 2;
     
     if (!businessName) return;
     
-    // 1. Try Scraper with Career URL
+    // 1. Auto-discover Career Page URL if missing
+    if (!careerUrl || careerUrl === "") {
+      careerUrl = Search.findCareerPage(businessName, town);
+      if (careerUrl) {
+        sheet.getRange(rowNum, 4).setValue(careerUrl);
+      }
+    }
+    
+    // 2. Try Scraper with Career URL
     let jobDetail = null;
     if (careerUrl) {
       jobDetail = Scraper.scrapeCareerPage(careerUrl);
     }
     
-    // 2. Fallback to Google Search if needed
+    // 3. Fallback to Google Search if scraper failed or was blocked
     if (!jobDetail || !jobDetail.title) {
       jobDetail = Search.fallbackSearchJobs(businessName, town);
     }
     
-    // 3. Update the row if new data found
+    // 4. Update the row with findings
     if (jobDetail && jobDetail.title) {
-      updateRow(sheet, index + 2, jobDetail); // index + 2 because of 1-indexing and header
+      updateRow(sheet, rowNum, jobDetail);
     }
   });
 }
