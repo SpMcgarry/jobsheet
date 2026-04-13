@@ -1,50 +1,82 @@
 /**
- * Main Entry Point for Regional Career Command Center
+ * Regional Career Command Center (Six Sigma Revision)
+ * Main logic for automation and UI.
  */
 
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('🚀 Career Command')
-    .addItem('1. Initial Setup (Seed Businesses)', 'setupSheet')
+    .addItem('1. Initial Setup', 'setupSheet')
     .addSeparator()
-    .addItem('2. Daily Refresh (Scrape Jobs)', 'manualRefresh')
-    .addItem('3. Scout New Companies (Discovery)', 'runDiscovery')
+    .addItem('2. Discover New Companies (Lean)', 'runDiscovery')
+    .addItem('3. Refresh All Jobs', 'manualRefresh')
     .addSeparator()
-    .addItem('⚙️ Setup / Update API Keys', 'showSettingsDialog')
+    .addItem('⚙️ API Settings', 'showSettingsDialog')
     .addToUi();
 }
 
 /**
- * Trigger business discovery
+ * Step 1: Initialize the sheet with headers and seed data
+ */
+function setupSheet() {
+  const sheet = getOrCreateSheet();
+  sheet.clear();
+  sheet.appendRow(CONFIG.HEADERS);
+  
+  // Format Headers
+  const range = sheet.getRange(1, 1, 1, CONFIG.HEADERS.length);
+  range.setBackground("#1a73e8")
+       .setFontColor("#ffffff")
+       .setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  
+  // Seed initial data
+  SEED_DATA.forEach(item => {
+    const enriched = Search.enrichCompanyInfo(item.name, item.town);
+    sheet.appendRow([
+      item.name, 
+      item.town, 
+      item.industry || enriched.industry || "Target", 
+      enriched.website || "", 
+      enriched.career_url || "", 
+      "", "", "", new Date().toLocaleDateString()
+    ]);
+  });
+  
+  SpreadsheetApp.getUi().alert("Sheet Setup Complete! Click 'Discover' to find more local businesses.");
+}
+
+/**
+ * Step 2: Discovery
  */
 function runDiscovery() {
   const ui = SpreadsheetApp.getUi();
-  ui.alert('Scouting for new businesses in ' + CONFIG.TOWNS.join(', ') + '. This uses your Search API.');
+  ui.alert("Scouting local Directories and Chambers for businesses. Please wait...");
   try {
     Search.discoverNewBusinesses();
-    ui.alert('Discovery Complete! Check the bottom of your sheet for new entries.');
+    ui.alert("Discovery cycle complete! Check the sheet for new entries.");
   } catch (e) {
-    ui.alert('Error during discovery: ' + e.message);
+    ui.alert("Discovery error: " + e.message);
   }
 }
 
 /**
- * Manual trigger for job refresh
+ * Step 3: Job Refresh
  */
 function manualRefresh() {
   const ui = SpreadsheetApp.getUi();
-  ui.alert('Refresing job listings. This may take a few minutes...');
+  ui.alert("Refreshing latest jobs for all companies in the dashboard...");
   try {
     refreshJobs();
-    ui.alert('Daily Refresh Complete!');
+    ui.alert("Job refresh complete!");
   } catch (e) {
-    ui.alert('Error during refresh: ' + e.message);
+    ui.alert("Refresh error: " + e.message);
     console.error(e);
   }
 }
 
 /**
- * Main logic to refresh jobs
+ * Core Logic: Iterate through all rows and find jobs
  */
 function refreshJobs() {
   const sheet = getOrCreateSheet();
@@ -52,74 +84,29 @@ function refreshJobs() {
   data.shift(); // Remove headers
   
   data.forEach((row, index) => {
-    const businessName = row[0];
+    const company = row[0];
     const town = row[1];
-    let careerUrl = row[3];
+    const careerUrl = row[4];
     const rowNum = index + 2;
     
-    if (!businessName) return;
+    if (!company) return;
     
-    // 1. Auto-discover Career Page URL if missing
-    if (!careerUrl || careerUrl === "") {
-      careerUrl = Search.findCareerPage(businessName, town);
-      if (careerUrl) {
-        sheet.getRange(rowNum, 4).setValue(careerUrl);
-      }
+    // Attempt to get latest job
+    const job = Scraper.getLatestJob(company, town, careerUrl);
+    
+    if (job && job.title) {
+      // Update: Latest Job Title, Date Posted, Job Link, Last Checked
+      sheet.getRange(rowNum, 6).setValue(job.title);
+      sheet.getRange(rowNum, 7).setValue(job.date || "Just now");
+      if (job.link) sheet.getRange(rowNum, 8).setValue(job.link);
+      sheet.getRange(rowNum, 9).setValue(new Date().toLocaleDateString());
+    } else {
+      sheet.getRange(rowNum, 9).setValue("No new jobs found");
     }
     
-    // 2. Try Scraper with Career URL
-    let jobDetail = null;
-    if (careerUrl) {
-      jobDetail = Scraper.scrapeCareerPage(careerUrl);
-    }
-    
-    // 3. Fallback to Google Search if scraper failed or was blocked
-    if (!jobDetail || !jobDetail.title) {
-      jobDetail = Search.fallbackSearchJobs(businessName, town);
-    }
-    
-    // 4. Update the row with findings
-    if (jobDetail && jobDetail.title) {
-      updateRow(sheet, rowNum, jobDetail);
-    }
+    // Spread out calls to stay under rate limits
+    Utilities.sleep(500);
   });
-}
-
-/**
- * Helper to update a row with new job data
- */
-function updateRow(sheet, rowNum, jobData) {
-  // Columns: [Business Name, Town, Industry, Career Page URL, Latest Job Title, Date Posted, Direct Job Link]
-  // Indices: 0, 1, 2, 3, 4, 5, 6
-  sheet.getRange(rowNum, 5).setValue(jobData.title);
-  sheet.getRange(rowNum, 6).setValue(jobData.date || new Date().toLocaleDateString());
-  sheet.getRange(rowNum, 7).setValue(jobData.link);
-}
-
-/**
- * Initial sheet setup
- */
-function setupSheet() {
-  const sheet = getOrCreateSheet();
-  sheet.clear();
-  sheet.appendRow(CONFIG.HEADERS);
-  
-  // Apply formatting (Header styling)
-  const headerRange = sheet.getRange(1, 1, 1, CONFIG.HEADERS.length);
-  headerRange.setBackground("#202124")
-             .setFontColor("#FFFFFF")
-             .setFontWeight("bold")
-             .setHorizontalAlignment("center");
-  
-  // Freeze Header
-  sheet.setFrozenRows(1);
-  
-  // Seed initial data
-  SEED_DATA.forEach(item => {
-    sheet.appendRow([item.name, item.town, item.industry, "", "", "", ""]);
-  });
-  
-  SpreadsheetApp.getUi().alert("Sheet Setup Complete! Please add Career Page URLs manually or use the Discovery tool.");
 }
 
 function getOrCreateSheet() {

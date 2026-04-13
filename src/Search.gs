@@ -1,132 +1,114 @@
 /**
- * Search Module
- * Responsible for finding career pages and fallback job searching
+ * Search Module (Six Sigma Revision)
+ * Focuses on high-yield discovery and reliable job snippet extraction.
  */
 
 var Search = {
   
   /**
-   * Fallback using Google Search API to find job snippets
-   */
-  fallbackSearchJobs: function(businessName, town) {
-    const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
-    const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
-    
-    if (!apiKey || !cx) return null;
-    
-    // Search query: "{Company} jobs {Town}" restricted to the last 2 days
-    const query = `${businessName} jobs ${town}`;
-    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&dateRestrict=d2`;
-    
-    try {
-      const response = UrlFetchApp.fetch(url);
-      const data = JSON.parse(response.getContentText());
-      
-      if (data.items && data.items.length > 0) {
-        const item = data.items[0]; // Take the first result
-        return {
-          title: item.title,
-          date: new Date().toLocaleDateString(), // Today, since we restricted search to last 2 days
-          link: item.link
-        };
-      }
-    } catch (e) {
-      console.error(`Search failed for ${query}: ${e.message}`);
-    }
-    return null;
-  },
-  
-  /**
-   * Discovery function to find a company's career page
-   */
-  findCareerPage: function(businessName, town) {
-    const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
-    const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
-    
-    if (!apiKey || !cx) return null;
-    
-    const query = `${businessName} ${town} career page`;
-    const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}`;
-    
-    try {
-      const response = UrlFetchApp.fetch(url);
-      const data = JSON.parse(response.getContentText());
-      
-      if (data.items && data.items.length > 0) {
-        return data.items[0].link;
-      }
-    } catch (e) {
-      console.error(`Discovery failed for ${query}: ${e.message}`);
-    }
-    return null;
-  },
-
-  /**
-   * Deep Discovery function to find a comprehensive list of companies
+   * Discovery: Find a town's business directory and extract companies.
    */
   discoverNewBusinesses: function() {
     const towns = CONFIG.TOWNS;
     const sheet = getOrCreateSheet();
     const existingNames = sheet.getDataRange().getValues().map(row => row[0].toString().toLowerCase());
-    const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
-    const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
-    
-    if (!apiKey || !cx) return;
-
-    const queryTemplates = [
-      "Major employers in [TOWN] MA",
-      "List of companies in [TOWN] MA",
-      "Industrial parks and businesses in [TOWN] MA",
-      "Chamber of commerce members in [TOWN] MA"
-    ];
     
     towns.forEach(town => {
-      queryTemplates.forEach(template => {
-        const query = template.replace("[TOWN]", town);
-        // Scan first 2 pages of Google (20 results)
-        [1, 11].forEach(start => {
-          const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}&start=${start}`;
-          
+      console.log(`Discovering businesses in ${town}...`);
+      
+      // Query for the specific town directory or Chamber list
+      const query = `${town} MA business directory chamber of commerce members`;
+      const searchResults = this.getGoogleSearchResults(query);
+      
+      if (searchResults && searchResults.length > 0) {
+        // We take the first 3 links which are usually the directories
+        searchResults.slice(0, 3).forEach(result => {
           try {
-            const response = UrlFetchApp.fetch(url);
-            const data = JSON.parse(response.getContentText());
+            const html = UrlFetchApp.fetch(result.link, { muteHttpExceptions: true }).getContentText();
+            const cleanText = Scraper.cleanHtml(html);
+            const companies = this.extractCompaniesFromDirectory(cleanText, town);
             
-            if (data.items) {
-              const combinedSnippets = data.items.map(item => item.snippet).join("\n");
-              const discovered = this.extractCompaniesWithAI(combinedSnippets, town);
-              
-              discovered.forEach(company => {
-                const name = company.name ? company.name.toString().trim() : "";
-                if (name && !existingNames.includes(name.toLowerCase())) {
-                  sheet.appendRow([name, town, company.industry || "Discovered", company.career_link || "", "", "", ""]);
-                  existingNames.push(name.toLowerCase());
-                }
-              });
-            }
+            companies.forEach(company => {
+              const name = company.name ? company.name.toString().trim() : "";
+              if (name && !existingNames.includes(name.toLowerCase())) {
+                const enriched = this.enrichCompanyInfo(name, town);
+                // Headers: Company Name, Town, Industry, Website, Career Page URL, Latest Job Title, Date Posted, Job Link, Last Checked
+                sheet.appendRow([
+                  name, 
+                  town, 
+                  company.industry || enriched.industry || "Discovered", 
+                  enriched.website || "", 
+                  enriched.career_url || "", 
+                  "", "", "", new Date().toLocaleDateString()
+                ]);
+                existingNames.push(name.toLowerCase());
+              }
+            });
           } catch (e) {
-            console.error(`Deep Discovery failed for ${query}: ${e.message}`);
+            console.error(`Failed to process directory ${result.link}: ${e.message}`);
           }
         });
-      });
+      }
     });
   },
 
   /**
-   * Exhaustive Gemini Extraction
+   * Uses Google Search API to get raw results
    */
-  extractCompaniesWithAI: function(text, town) {
+  getGoogleSearchResults: function(query, dateRestrict = "") {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_KEY');
+    const cx = PropertiesService.getScriptProperties().getProperty('GOOGLE_SEARCH_CX');
+    if (!apiKey || !cx) return [];
+    
+    let url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=${encodeURIComponent(query)}`;
+    if (dateRestrict) url += `&dateRestrict=${dateRestrict}`;
+    
+    try {
+      const response = UrlFetchApp.fetch(url);
+      const data = JSON.parse(response.getContentText());
+      return data.items || [];
+    } catch (e) {
+      console.error(`Search API Error: ${e.message}`);
+      return [];
+    }
+  },
+
+  /**
+   * AI Extraction from Directory HTML
+   */
+  extractCompaniesFromDirectory: function(text, town) {
     const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
     if (!apiKey) return [];
     
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     const prompt = `
-      EXTRACT EVERY COMPANY: Scan the following search snippets for ANY business or employer located in ${town}, MA.
-      Be exhaustive. Include small businesses, tech firms, manufacturing, and municipal entities.
-      Return ONLY a JSON array: [{"name": "Exact Company Name", "industry": "Industry Type", "career_link": "URL if findable"}]
-      
+      EXTRACT BUSINESSES: Scan this text for a list of businesses in ${town}, MA.
+      Return ONLY a JSON array of objects: [{"name": "Company Name", "industry": "Industry"}]
+      Be exhaustive.
       TEXT:
       ${text}
     `;
+    
+    return this.callAI(prompt) || [];
+  },
+
+  /**
+   * Enrich company with Website and Career Page URL
+   */
+  enrichCompanyInfo: function(name, town) {
+    const prompt = `
+      Find the official Website and Career Page URL for "${name}" in ${town}, MA.
+      Return ONLY a JSON object: {"website": "URL", "career_url": "URL", "industry": "Industry"}
+      If you are unsure, provide your best guess based on your knowledge.
+    `;
+    return this.callAI(prompt) || {};
+  },
+
+  /**
+   * Helper for Gemini Calls
+   */
+  callAI: function(prompt) {
+    const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
     
     const options = {
       method: 'POST',
@@ -136,12 +118,14 @@ var Search = {
     };
     
     try {
-      const response = UrlFetchApp.fetch(apiUrl, options);
+      const response = UrlFetchApp.fetch(url, options);
       const result = JSON.parse(response.getContentText());
-      const jsonStr = result.candidates[0].content.parts[0].text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const text = result.candidates[0].content.parts[0].text;
+      const jsonStr = text.replace(/```json/g, '').replace(/```/g, '').trim();
       return JSON.parse(jsonStr);
     } catch (e) {
-      return [];
+      console.error("AI Call failed", e);
+      return null;
     }
   }
 };
